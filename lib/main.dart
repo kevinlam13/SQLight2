@@ -140,19 +140,39 @@ class _CardListScreenState extends State<CardListScreen> {
                     ? CircleAvatar(backgroundImage: NetworkImage(c.imageUrl!))
                     : const CircleAvatar(child: Icon(Icons.image_not_supported)),
                 title: Text('${c.name} of ${c.suit}'),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.redAccent),
-                  onPressed: () async {
-                    await DatabaseHelper.instance.deleteCard(c.id!);
-                    final left = await DatabaseHelper.instance
-                        .cardCountInFolder(widget.folder.id!);
-                    if (left < 3) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Warning: fewer than 3 cards remain.')),
-                      );
-                    }
-                    _reload();
-                  },
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit),
+                      onPressed: () async {
+                        final edited = await showDialog<CardModel?>(
+                          context: context,
+                          builder: (_) => _EditCardDialog(card: c),
+                        );
+                        if (edited != null) {
+                          await DatabaseHelper.instance.updateCard(edited);
+                          _reload();
+                        }
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.redAccent),
+                      onPressed: () async {
+                        await DatabaseHelper.instance.deleteCard(c.id!);
+                        final left = await DatabaseHelper.instance
+                            .cardCountInFolder(widget.folder.id!);
+                        if (left < 3) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Warning: fewer than 3 cards remain.'),
+                            ),
+                          );
+                        }
+                        _reload();
+                      },
+                    ),
+                  ],
                 ),
               );
             },
@@ -163,7 +183,10 @@ class _CardListScreenState extends State<CardListScreen> {
         onPressed: () async {
           final newCard = await showDialog<CardModel?>(
             context: context,
-            builder: (_) => _AddCardDialog(folderName: widget.folder.name, folderId: widget.folder.id!),
+            builder: (_) => _AddCardDialog(
+              folderName: widget.folder.name,
+              folderId: widget.folder.id!,
+            ),
           );
           if (newCard != null) {
             try {
@@ -175,7 +198,12 @@ class _CardListScreenState extends State<CardListScreen> {
                 builder: (_) => AlertDialog(
                   title: const Text('Folder Full'),
                   content: Text(e.message ?? 'This folder is full (max 6).'),
-                  actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('OK'),
+                    ),
+                  ],
                 ),
               );
             }
@@ -199,8 +227,8 @@ class _AddCardDialog extends StatefulWidget {
 
 class _AddCardDialogState extends State<_AddCardDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _rankCtrl = TextEditingController();   // 1-13 or A,2..K
-  final _imageCtrl = TextEditingController();  // optional URL
+  final _rankCtrl = TextEditingController();
+  final _imageCtrl = TextEditingController();
 
   @override
   void dispose() {
@@ -215,24 +243,7 @@ class _AddCardDialogState extends State<_AddCardDialog> {
     if (t == '11') return 'J';
     if (t == '12') return 'Q';
     if (t == '13') return 'K';
-    return t; // A,2..10,J,Q,K
-  }
-
-  String _defaultImageUrl(String suit, String rank) {
-    // Simple Wikimedia pattern; works for A, J, Q, K and 2..10
-    final suitLower = suit.toLowerCase();
-    final rankName = {
-      'A':'A', 'J':'J', 'Q':'Q', 'K':'K',
-      '2':'2', '3':'3', '4':'4', '5':'5',
-      '6':'6', '7':'7', '8':'8', '9':'9', '10':'10'
-    }[rank]!;
-    final suitWord = suitLower.substring(0,1).toUpperCase()+suitLower.substring(1);
-    return 'https://upload.wikimedia.org/wikipedia/commons/${{
-      'hearts':'5/57','spades':'2/25','diamonds':'d/d3','clubs':'a/ab'
-    }[suitLower]}/Playing_card_${suitLower}_${rankName}.svg';
-    // Note: Wikimedia uses SVG; Android renders SVG via network fine in WebView,
-    // but Image.network shows SVG as bytes not rasterized. For class purposes, keep URL;
-    // or use PNG URLs if you prefer another source.
+    return t;
   }
 
   @override
@@ -252,9 +263,11 @@ class _AddCardDialogState extends State<_AddCardDialog> {
               ),
               validator: (v) {
                 if (v == null || v.trim().isEmpty) return 'Enter a rank';
-                final t = v.trim().toUpperCase();
-                const allowed = {'A','2','3','4','5','6','7','8','9','10','J','Q','K','1','11','12','13'};
-                if (!allowed.contains(t)) return 'Invalid rank';
+                const allowed = {
+                  'A','2','3','4','5','6','7','8','9','10',
+                  'J','Q','K','1','11','12','13'
+                };
+                if (!allowed.contains(v.trim().toUpperCase())) return 'Invalid rank';
                 return null;
               },
             ),
@@ -276,9 +289,8 @@ class _AddCardDialogState extends State<_AddCardDialog> {
             if (!_formKey.currentState!.validate()) return;
             final rank = _normalizeRank(_rankCtrl.text);
             final url = _imageCtrl.text.trim().isEmpty
-                ? _defaultImageUrl(widget.folderName, rank)
+                ? null
                 : _imageCtrl.text.trim();
-
             final card = CardModel(
               name: rank,
               suit: widget.folderName,
@@ -288,6 +300,83 @@ class _AddCardDialogState extends State<_AddCardDialog> {
             Navigator.pop(context, card);
           },
           child: const Text('Add'),
+        ),
+      ],
+    );
+  }
+}
+
+class _EditCardDialog extends StatefulWidget {
+  final CardModel card;
+  const _EditCardDialog({required this.card});
+
+  @override
+  State<_EditCardDialog> createState() => _EditCardDialogState();
+}
+
+class _EditCardDialogState extends State<_EditCardDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late TextEditingController _rankCtrl;
+  late TextEditingController _imageCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _rankCtrl = TextEditingController(text: widget.card.name);
+    _imageCtrl = TextEditingController(text: widget.card.imageUrl ?? '');
+  }
+
+  @override
+  void dispose() {
+    _rankCtrl.dispose();
+    _imageCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit Card'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _rankCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Rank (A,2..10,J,Q,K)',
+                border: OutlineInputBorder(),
+              ),
+              validator: (v) =>
+              (v == null || v.trim().isEmpty) ? 'Enter a rank' : null,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _imageCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Image URL',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () {
+            if (!_formKey.currentState!.validate()) return;
+            final updated = CardModel(
+              id: widget.card.id,
+              name: _rankCtrl.text.trim().toUpperCase(),
+              suit: widget.card.suit,
+              folderId: widget.card.folderId,
+              imageUrl: _imageCtrl.text.trim().isEmpty ? null : _imageCtrl.text.trim(),
+            );
+            Navigator.pop(context, updated);
+          },
+          child: const Text('Save'),
         ),
       ],
     );
